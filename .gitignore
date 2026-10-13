@@ -1,6 +1,21 @@
+# Python virtual environment
 .venv/
+venv/
+
+# Python cache files
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+
+# MLflow local tracking data
+mlflow.db
 mlruns/
+
+# Generated model files
 models/
+*.joblib
+
+# Testing cache
+.pytest_cache/
+
+# Environment variables and secrets
+.env
