@@ -22,6 +22,12 @@ pipeline {
                 sh '.venv/bin/python src/train_required_models.py'
             }
         }
+
+        stage('Register Models in MLflow') {
+            steps {
+                sh '.venv/bin/python src/register_models.py'
+            }
+        }
     }
 
     post {
