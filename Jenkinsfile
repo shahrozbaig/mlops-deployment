@@ -19,7 +19,7 @@ pipeline {
 
         stage('Train Required Models') {
             steps {
-                sh 'python3 src/train_required_models.py'
+                sh '.venv/bin/python src/train_required_models.py'
             }
         }
     }
