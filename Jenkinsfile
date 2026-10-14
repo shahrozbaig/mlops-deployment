@@ -11,10 +11,13 @@ pipeline {
     environment {
         MLFLOW_TRACKING_URI = 'sqlite:////var/lib/jenkins/mlflow/mlflow.db'
         MLFLOW_ARTIFACT_ROOT = 'file:///var/lib/jenkins/mlflow/artifacts'
+        API_BASE_URL = 'http://127.0.0.1:8000'
     }
 
     stages {
-        stage('Project Checks') {
+        // ================= DEV PIPELINE =================
+
+        stage('Dev: Project Checks') {
             when {
                 branch 'dev'
             }
@@ -25,7 +28,7 @@ pipeline {
             }
         }
 
-        stage('Train Required Models') {
+        stage('Dev: Train Required Models') {
             when {
                 branch 'dev'
             }
@@ -34,12 +37,82 @@ pipeline {
             }
         }
 
-        stage('Register Models in MLflow') {
+        stage('Dev: Register Models in MLflow') {
             when {
                 branch 'dev'
             }
             steps {
                 sh '.venv/bin/python src/register_models.py'
+            }
+        }
+
+        // ============ MAIN PRE-PRODUCTION PIPELINE ============
+
+        stage('Pre-prod: Install Dependencies') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh '''
+                    python3 -m venv .venv
+                    .venv/bin/python -m pip install -q -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Pre-prod: Prepare Models') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh '.venv/bin/python src/preproduction.py'
+            }
+        }
+
+        stage('Pre-prod: Deploy and Test API') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh '''
+                    set -eu
+
+                    .venv/bin/python -m uvicorn src.api:app \
+                        --host 127.0.0.1 \
+                        --port 8000 \
+                        > api.log 2>&1 &
+
+                    API_PID=$!
+                    trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+
+                    READY=0
+                    for i in $(seq 1 30); do
+                        if .venv/bin/python -c \
+                            "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2)" \
+                            >/dev/null 2>&1; then
+                            READY=1
+                            break
+                        fi
+                        sleep 1
+                    done
+
+                    if [ "$READY" -ne 1 ]; then
+                        cat api.log
+                        echo "API failed to start"
+                        exit 1
+                    fi
+
+                    .venv/bin/python src/test_deployment.py
+                '''
+            }
+        }
+
+        stage('Pre-prod: Promote Tested Models') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh '.venv/bin/python src/promote_models.py'
             }
         }
     }
@@ -51,6 +124,10 @@ pipeline {
 
         failure {
             echo 'MLOps pipeline failed. Check the console output.'
+        }
+
+        always {
+            echo 'Pipeline execution finished.'
         }
     }
 }
