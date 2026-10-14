@@ -1,11 +1,13 @@
 
 from pathlib import Path
 import math
+import os
 
 import joblib
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+from mlflow import MlflowClient
 
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
@@ -30,7 +32,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
 # --------------------------------------------------
-# 1. Paths and MLflow configuration
+# 1. Paths and shared MLflow configuration
 # --------------------------------------------------
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
@@ -42,6 +44,18 @@ HEART_PATH = DATA_DIR / "heart_disease.csv"
 BOSTON_PATH = DATA_DIR / "boston_housing.csv"
 MLFLOW_DB = PROJECT_DIR / "mlflow.db"
 
+EXPERIMENT_NAME = "MLOps-Required-Datasets"
+
+# Jenkins can provide a shared tracking URI.
+# Local Windows runs continue using the project database.
+TRACKING_URI = os.getenv(
+    "MLFLOW_TRACKING_URI",
+    f"sqlite:///{MLFLOW_DB.as_posix()}",
+)
+
+# Set this in Jenkins to a persistent artifact directory.
+ARTIFACT_ROOT = os.getenv("MLFLOW_ARTIFACT_ROOT")
+
 if not HEART_PATH.exists():
     raise FileNotFoundError(
         f"Missing {HEART_PATH}. Run src/ingest_datasets.py first."
@@ -52,10 +66,27 @@ if not BOSTON_PATH.exists():
         f"Missing {BOSTON_PATH}. Run src/ingest_datasets.py first."
     )
 
-mlflow.set_tracking_uri(
-    f"sqlite:///{MLFLOW_DB.as_posix()}"
-)
-mlflow.set_experiment("MLOps-Required-Datasets")
+mlflow.set_tracking_uri(TRACKING_URI)
+client = MlflowClient(tracking_uri=TRACKING_URI)
+
+# Create the experiment with a stable artifact location if it
+# does not already exist. Existing experiments are not modified.
+experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+
+if experiment is None:
+    if ARTIFACT_ROOT:
+        client.create_experiment(
+            name=EXPERIMENT_NAME,
+            artifact_location=ARTIFACT_ROOT,
+        )
+    else:
+        client.create_experiment(name=EXPERIMENT_NAME)
+
+mlflow.set_experiment(EXPERIMENT_NAME)
+
+print("MLflow tracking URI:", TRACKING_URI)
+print("MLflow experiment:", EXPERIMENT_NAME)
+print("MLflow artifact root:", ARTIFACT_ROOT or "MLflow default")
 
 
 # --------------------------------------------------
@@ -99,25 +130,15 @@ def make_heart_preprocessor():
 
     categorical_pipeline = Pipeline(
         steps=[
-            (
-                "imputer",
-                SimpleImputer(strategy="most_frequent"),
-            ),
-            (
-                "onehot",
-                OneHotEncoder(handle_unknown="ignore"),
-            ),
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
         ]
     )
 
     return ColumnTransformer(
         transformers=[
             ("numeric", numeric_pipeline, numeric_features),
-            (
-                "categorical",
-                categorical_pipeline,
-                categorical_features,
-            ),
+            ("categorical", categorical_pipeline, categorical_features),
         ]
     )
 
@@ -149,25 +170,17 @@ def train_classifier(model_name, classifier):
         probabilities = pipeline.predict_proba(X_test)[:, 1]
 
         metrics = {
-            "accuracy": float(
-                accuracy_score(y_test, predictions)
-            ),
+            "accuracy": float(accuracy_score(y_test, predictions)),
             "precision": float(
-                precision_score(
-                    y_test, predictions, zero_division=0
-                )
+                precision_score(y_test, predictions, zero_division=0)
             ),
             "recall": float(
-                recall_score(
-                    y_test, predictions, zero_division=0
-                )
+                recall_score(y_test, predictions, zero_division=0)
             ),
             "f1_score": float(
                 f1_score(y_test, predictions, zero_division=0)
             ),
-            "roc_auc": float(
-                roc_auc_score(y_test, probabilities)
-            ),
+            "roc_auc": float(roc_auc_score(y_test, probabilities)),
         }
 
         mlflow.log_params(
@@ -185,9 +198,6 @@ def train_classifier(model_name, classifier):
         model_path = MODEL_DIR / f"{model_name}.joblib"
         joblib.dump(pipeline, model_path)
 
-        # This is a model created by our own training script.
-        # Pickle serialization avoids the skops trusted-type
-        # error encountered in the earlier practice run.
         mlflow.sklearn.log_model(
             sk_model=pipeline,
             name=model_name,
@@ -209,7 +219,7 @@ def train_classifier(model_name, classifier):
 
 
 # --------------------------------------------------
-# 5. Train Random Forest and Logistic Regression
+# 5. Train Heart Disease classifiers
 # --------------------------------------------------
 
 train_classifier(
@@ -249,7 +259,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 
 # --------------------------------------------------
-# 7. Train Random Forest Regressor
+# 7. Train Boston Housing Random Forest regressor
 # --------------------------------------------------
 
 housing_model = Pipeline(
@@ -268,20 +278,15 @@ housing_model = Pipeline(
 with mlflow.start_run(
     run_name="boston_random_forest_regressor"
 ) as run:
-
     housing_model.fit(X_train, y_train)
     predictions = housing_model.predict(X_test)
 
     metrics = {
-        "mae": float(
-            mean_absolute_error(y_test, predictions)
-        ),
+        "mae": float(mean_absolute_error(y_test, predictions)),
         "rmse": float(
             math.sqrt(mean_squared_error(y_test, predictions))
         ),
-        "r2_score": float(
-            r2_score(y_test, predictions)
-        ),
+        "r2_score": float(r2_score(y_test, predictions)),
     }
 
     mlflow.log_params(
@@ -321,4 +326,5 @@ with mlflow.start_run(
 
 
 print("\nAll required training experiments completed!")
-print("MLflow database:", MLFLOW_DB)
+print("MLflow tracking URI:", TRACKING_URI)
+print("Local MLflow database path:", MLFLOW_DB)
