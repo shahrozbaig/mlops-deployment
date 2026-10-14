@@ -15,6 +15,7 @@ pipeline {
     }
 
     stages {
+
         // ================= DEV PIPELINE =================
 
         stage('Dev: Project Checks') {
@@ -54,8 +55,24 @@ pipeline {
             }
             steps {
                 sh '''
+                    set -eu
+
                     python3 -m venv .venv
+
+                    .venv/bin/python -m pip install --upgrade pip
+
                     .venv/bin/python -m pip install -q -r requirements.txt
+
+                    .venv/bin/python -m pip install \
+                        --upgrade "typing_extensions==4.16.0"
+
+                    echo "Checking typing_extensions..."
+                    .venv/bin/python -c \
+                        "from typing_extensions import Sentinel; print('Sentinel import OK')"
+
+                    echo "Checking MLflow..."
+                    .venv/bin/python -c \
+                        "import mlflow; print('MLflow import OK')"
                 '''
             }
         }
@@ -86,6 +103,7 @@ pipeline {
                     trap 'kill "$API_PID" 2>/dev/null || true' EXIT
 
                     READY=0
+
                     for i in $(seq 1 30); do
                         if .venv/bin/python -c \
                             "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2)" \
@@ -93,6 +111,7 @@ pipeline {
                             READY=1
                             break
                         fi
+
                         sleep 1
                     done
 
@@ -101,6 +120,9 @@ pipeline {
                         echo "API failed to start"
                         exit 1
                     fi
+
+                    echo "API health check passed."
+                    echo "Running deployment tests..."
 
                     .venv/bin/python src/test_deployment.py
                 '''
