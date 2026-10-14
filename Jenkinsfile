@@ -19,7 +19,7 @@ pipeline {
 
         stage('Train Required Models') {
             steps {
-                bat 'python src\\train_required_models.py'
+                sh 'python3 src/train_required_models.py'
             }
         }
     }
