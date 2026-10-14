@@ -49,33 +49,29 @@ pipeline {
 
         // ============ MAIN PRE-PRODUCTION PIPELINE ============
 
-        stage('Pre-prod: Install Dependencies') {
-            when {
-                branch 'main'
-            }
-            steps {
-                sh '''
-                    set -eu
+     
+stage('Pre-prod: Install Dependencies') {
+    when {
+        branch 'main'
+    }
+    steps {
+        sh '''
+            set -eu
 
-                    python3 -m venv .venv
+            python3.12 -m venv .venv
 
-                    .venv/bin/python -m pip install --upgrade pip
+            .venv/bin/python -m pip install --upgrade pip
 
-                    .venv/bin/python -m pip install -q -r requirements.txt
+            .venv/bin/python -m pip install -q -r requirements.txt
 
-                    .venv/bin/python -m pip install \
-                        --upgrade "typing_extensions==4.16.0"
+            .venv/bin/python -c \
+                "import sys; print('Python:', sys.version)"
 
-                    echo "Checking typing_extensions..."
-                    .venv/bin/python -c \
-                        "from typing_extensions import Sentinel; print('Sentinel import OK')"
-
-                    echo "Checking MLflow..."
-                    .venv/bin/python -c \
-                        "import mlflow; print('MLflow import OK')"
-                '''
-            }
-        }
+            .venv/bin/python -c \
+                "import mlflow; print('MLflow import OK')"
+        '''
+    }
+}
 
         stage('Pre-prod: Prepare Models') {
             when {
